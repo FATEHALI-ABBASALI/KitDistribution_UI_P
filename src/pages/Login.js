@@ -8,9 +8,21 @@ function Login() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // 🔥 NEW STATES (ADDED)
+  // 🔥 NEW STATES
   const [tapCount, setTapCount] = useState(0);
   const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [isMobile, setIsMobile] = useState(false); // ✅ NEW
+
+  // ================= DEVICE DETECT =================
+  useEffect(() => {
+    const checkMobile = () => {
+      const userAgent = navigator.userAgent.toLowerCase();
+      const mobile = /android|iphone|ipad|ipod|opera mini|iemobile|wpdesktop/i.test(userAgent);
+      setIsMobile(mobile);
+    };
+
+    checkMobile();
+  }, []);
 
   // ================= AUTO LOGIN =================
   useEffect(() => {
@@ -24,7 +36,7 @@ function Login() {
     }
   }, []);
 
-  // 🔥 ADMIN UNLOCK LOGIC (ADDED)
+  // 🔥 ADMIN UNLOCK LOGIC
   useEffect(() => {
     if (tapCount >= 10) {
       setAdminUnlocked(true);
@@ -52,11 +64,13 @@ function Login() {
         throw new Error("Invalid server response");
       }
 
-      // 🔥 BLOCK ADMIN ON MOBILE UNLESS UNLOCKED
-      if (res.role === "Admin" && !adminUnlocked) {
-        alert("❌ Admin login not allowed on mobile");
-        setLoading(false);
-        return;
+      // 🔥 FIXED LOGIC
+      if (res.role === "Admin") {
+        if (isMobile && !adminUnlocked) {
+          alert("❌ Admin login not allowed on mobile");
+          setLoading(false);
+          return;
+        }
       }
 
       localStorage.setItem("token", res.token);
@@ -71,6 +85,7 @@ function Login() {
           localStorage.clear();
         }
       }, 300);
+
     } catch (err) {
       alert(err.message || "Invalid credentials");
       localStorage.clear();
@@ -93,7 +108,7 @@ function Login() {
           src={logo}
           alt="RMS Logo"
           className="login-logo"
-          onClick={() => setTapCount(prev => prev + 1)} // 🔥 TAP TO UNLOCK
+          onClick={() => setTapCount(prev => prev + 1)}
         />
 
         {/* ===== TITLE ===== */}

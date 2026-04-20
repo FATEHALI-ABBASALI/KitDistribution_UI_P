@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Html5QrcodeScanner } from "html5-qrcode";
+import { Html5Qrcode } from "html5-qrcode";
 import { apiRequest } from "../../api/api";
 
 function TerminalDashboard() {
@@ -12,20 +12,17 @@ function TerminalDashboard() {
   const [msg, setMsg] = useState("");
   const [showScanner, setShowScanner] = useState(false);
 
+  const scannerRef = useRef(null);
+  const isRunningRef = useRef(false);
+
   // ================= AUTO DATE =================
   useEffect(() => {
-    const today = new Date().toISOString().split("T")[0];
-    setDate(today);
+    setDate(new Date().toISOString().split("T")[0]);
   }, []);
 
   // ================= FETCH =================
   const fetchBeneficiary = async (idParam) => {
-    const rawId = idParam || beneficiaryId;
-
-    // ✅ FIX: force string
-    const id = String(rawId || "").trim().toUpperCase();
-
-    console.log("FETCH ID:", id); // debug
+    const id = String(idParam || beneficiaryId || "").trim().toUpperCase();
 
     if (!id) {
       setMsg("❌ Enter Beneficiary ID");
@@ -33,27 +30,17 @@ function TerminalDashboard() {
     }
 
     try {
-      // BENEFICIARY
-      const res = await apiRequest(
-        `/api/terminal/beneficiary/${id}`,
-        "GET"
-      );
+      const res = await apiRequest(`/api/terminal/beneficiary/${id}`);
       setBeneficiaryData(res);
 
-      // MONTH STATUS
-      const months = await apiRequest(
-        `/api/terminal/beneficiary-status/${id}`,
-        "GET"
-      );
-
+      const months = await apiRequest(`/api/terminal/beneficiary-status/${id}`);
       setMonthStatus(months);
-      setShowPopup(true);
 
+      setShowPopup(true);
       setMsg("✅ Data loaded");
-    } catch (err) {
-      console.log("ERROR:", err);
+    } catch {
       setBeneficiaryData(null);
-      setMsg("❌ Not found or unauthorized");
+      setMsg("❌ Not found");
     }
   };
 
@@ -68,11 +55,9 @@ function TerminalDashboard() {
     }
   };
 
-  // ================= QR =================
+  // ================= CAMERA SCANNER =================
   useEffect(() => {
     if (!showScanner) return;
-
-    let scanner;
 
     const startScanner = async () => {
       const allowed = await requestCameraPermission();
@@ -81,38 +66,89 @@ function TerminalDashboard() {
         return;
       }
 
-      scanner = new Html5QrcodeScanner(
-        "qr-reader",
-        { fps: 10, qrbox: 220 },
-        false
-      );
+      if (!scannerRef.current) {
+        scannerRef.current = new Html5Qrcode("qr-reader");
+      }
 
-      scanner.render(
-        (text) => {
-          const match = text.match(/ID:([^,]+)/);
+      try {
+        await scannerRef.current.start(
+          { facingMode: "environment" },
+          { fps: 20, qrbox: 250 },
+          (text) => {
+            const match = text.match(/ID:([^,]+)/);
 
-          if (match) {
-            const id = String(match[1] || "").trim().toUpperCase();
+            if (match) {
+              const id = String(match[1]).trim().toUpperCase();
 
-            setBeneficiaryId(id);
-            setMsg("✅ QR scanned");
+              setBeneficiaryId(id);
+              setMsg("✅ QR scanned");
 
-            setTimeout(() => fetchBeneficiary(id), 200);
-          } else {
-            setMsg("❌ Invalid QR");
+              navigator.vibrate?.(150);
+              setTimeout(() => fetchBeneficiary(id), 150);
+            } else {
+              setMsg("❌ Invalid QR");
+            }
+
+            stopScanner();
           }
+        );
 
-          setShowScanner(false);
-          scanner.clear().catch(() => {});
-        },
-        () => {}
-      );
+        isRunningRef.current = true;
+
+      } catch {
+        setMsg("❌ Camera start failed");
+        setShowScanner(false);
+      }
     };
 
     startScanner();
 
-    return () => scanner?.clear().catch(() => {});
+    return () => stopScanner();
   }, [showScanner]);
+
+  const stopScanner = async () => {
+    if (scannerRef.current && isRunningRef.current) {
+      try {
+        await scannerRef.current.stop();
+      } catch {}
+      isRunningRef.current = false;
+      setShowScanner(false);
+    }
+  };
+
+  // ================= FILE SCAN =================
+  const handleFileScan = () => {
+    document.getElementById("qr-file-input").click();
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const html5Qr = new Html5Qrcode("qr-reader-file");
+
+    try {
+      const text = await html5Qr.scanFile(file, true);
+
+      const match = text.match(/ID:([^,]+)/);
+
+      if (match) {
+        const id = String(match[1]).trim().toUpperCase();
+
+        setBeneficiaryId(id);
+        setMsg("✅ QR scanned from file");
+
+        setTimeout(() => fetchBeneficiary(id), 150);
+      } else {
+        setMsg("❌ Invalid QR");
+      }
+
+    } catch {
+      setMsg("❌ File scan failed");
+    }
+
+    e.target.value = "";
+  };
 
   // ================= DISTRIBUTE =================
   const distributeKit = async () => {
@@ -136,6 +172,7 @@ function TerminalDashboard() {
       setMsg(`✅ Kit distributed for ${res.month}`);
       setBeneficiaryId("");
       setBeneficiaryData(null);
+
     } catch (e) {
       setMsg(e.message || "❌ Already distributed");
     }
@@ -149,7 +186,7 @@ function TerminalDashboard() {
 
   return (
     <motion.div className="terminal-page">
-      {/* HEADER */}
+
       <div className="terminal-header">
         <h2>Terminal Dashboard</h2>
         <button className="logout-btn" onClick={logout}>
@@ -157,22 +194,19 @@ function TerminalDashboard() {
         </button>
       </div>
 
-      {/* CARD */}
       <div className="terminal-card">
         <h3>Distribute Kit</h3>
 
-        {/* INPUT + FETCH */}
         <label>Beneficiary ID</label>
         <div className="input-row">
           <input
             placeholder="BEN123"
             value={beneficiaryId}
             onChange={(e) =>
-              setBeneficiaryId(String(e.target.value || "").toUpperCase())
+              setBeneficiaryId(e.target.value.toUpperCase())
             }
           />
 
-          {/* ✅ FIXED BUTTON */}
           <button
             className="fetch-btn"
             onClick={() => fetchBeneficiary(beneficiaryId)}
@@ -181,15 +215,27 @@ function TerminalDashboard() {
           </button>
         </div>
 
-        {/* QR BUTTON */}
+        {/* 🔥 CAMERA SCAN */}
         <button
           className="qr-btn"
           onClick={() => setShowScanner(!showScanner)}
         >
-          {showScanner ? "Close Scanner" : "Scan QR Code"}
+          {showScanner ? "Close Scanner" : "Scan QR"}
         </button>
 
-        {/* QR SCANNER */}
+        {/* 🔥 FILE UPLOAD */}
+        <button className="qr-btn" onClick={handleFileScan}>
+          Upload QR
+        </button>
+
+        <input
+          type="file"
+          accept="image/*"
+          id="qr-file-input"
+          style={{ display: "none" }}
+          onChange={handleFileChange}
+        />
+
         <AnimatePresence>
           {showScanner && (
             <motion.div className="qr-wrapper">
@@ -198,10 +244,11 @@ function TerminalDashboard() {
           )}
         </AnimatePresence>
 
-        {/* DATA */}
+        <div id="qr-reader-file" style={{ display: "none" }}></div>
+
         {beneficiaryData && (
           <div className="beneficiary-box">
-            <h4>Beneficiary Details</h4>
+            <h4>Details</h4>
             <p><b>ID:</b> {beneficiaryData.beneficiary_id}</p>
             <p><b>Name:</b> {beneficiaryData.fullName}</p>
             <p><b>Mobile:</b> {beneficiaryData.mobile}</p>
@@ -209,7 +256,6 @@ function TerminalDashboard() {
           </div>
         )}
 
-        {/* DATE */}
         <label>Date</label>
         <input
           type="date"
@@ -217,12 +263,10 @@ function TerminalDashboard() {
           onChange={(e) => setDate(e.target.value)}
         />
 
-        {/* DISTRIBUTE */}
         <button className="success-btn full" onClick={distributeKit}>
           Distribute Kit
         </button>
 
-        {/* MESSAGE */}
         {msg && <div className="info-box">{msg}</div>}
       </div>
 
@@ -230,7 +274,7 @@ function TerminalDashboard() {
       {showPopup && (
         <div className="popup-overlay">
           <div className="popup-box">
-            <h3>Monthly Kit Status</h3>
+            <h3>Monthly Status</h3>
 
             <div className="month-grid">
               {monthStatus.map((m, i) => (

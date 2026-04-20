@@ -38,7 +38,7 @@ export default function AdminAnnualReports() {
       const token = localStorage.getItem("token");
 
       const res = await fetch(
-        "http://localhost:8080/api" + url,
+        "https://kitdistributionapi-production.up.railway.app/api" + url,
         {
           headers: {
             Authorization: "Bearer " + token,

@@ -18,7 +18,7 @@ const AdminUpload = () => {
 
     try {
       const res = await fetch(
-        `http://localhost:8080/api/upload/${type}`, // 🔁 change port if needed
+        `https://kitdistributionapi-production.up.railway.app/api/upload/${type}`, // 🔁 change port if needed
         {
           method: "POST",
           body: formData,
